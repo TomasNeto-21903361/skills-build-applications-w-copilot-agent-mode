@@ -1,59 +1,66 @@
 import { connectDatabase, disconnectDatabase } from '../config/database.js';
 import { Activity, Team, User, Workout } from '../models/index.js';
 
-// Seed stable demo records without clearing data owned by the application.
+async function upsertDemoTeam(name: string, mascot: string) {
+  return Team.findOneAndUpdate(
+    { name },
+    { $set: { name, mascot } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+}
+
 async function upsertDemoUser(name: string, email: string, teamId: InstanceType<typeof Team>['_id'], fitnessGoal: string) {
   const previousUser = await User.findOne({ email }).select('_id team');
   if (previousUser?.team && previousUser.team.toString() !== teamId.toString()) {
     await Team.updateOne({ _id: previousUser.team }, { $pull: { members: previousUser._id } });
   }
+
   const user = await User.findOneAndUpdate(
     { email },
     { $set: { name, email, team: teamId, fitnessGoal } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
+
   await Team.updateOne({ _id: teamId }, { $addToSet: { members: user._id } });
   return user;
+}
+
+async function upsertDemoActivity(userId: InstanceType<typeof User>['_id'], teamId: InstanceType<typeof Team>['_id'], type: string, minutes: number, occurredAt: Date) {
+  const points = minutes;
+  return Activity.findOneAndUpdate(
+    { user: userId, team: teamId, type, occurredAt },
+    { $set: { user: userId, team: teamId, type, minutes, points, occurredAt } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+}
+
+async function upsertDemoWorkout(title: string, focus: string, minutes: number, difficulty: string) {
+  return Workout.findOneAndUpdate(
+    { title },
+    { $set: { title, focus, minutes, difficulty } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
 }
 
 export async function seed() {
   await connectDatabase();
   try {
-    const octocats = await Team.findOneAndUpdate(
-      { name: 'Octocats' },
-      { $set: { name: 'Octocats', mascot: 'Mona' } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
-    const robocats = await Team.findOneAndUpdate(
-      { name: 'Robocats' },
-      { $set: { name: 'Robocats', mascot: 'Hubot' } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
+    const octocats = await upsertDemoTeam('Octocats', 'Mona');
+    const robocats = await upsertDemoTeam('Robocats', 'Hubot');
+
     const mona = await upsertDemoUser('Mona', 'mona@example.com', octocats._id, 'endurance');
     const hubot = await upsertDemoUser('Hubot', 'hubot@example.com', robocats._id, 'strength');
 
     const monaRunAt = new Date('2026-01-10T12:00:00.000Z');
     const hubotCycleAt = new Date('2026-01-11T12:00:00.000Z');
-    await Activity.updateOne(
-      { user: mona._id, team: octocats._id, type: 'run', occurredAt: monaRunAt },
-      { $set: { user: mona._id, team: octocats._id, type: 'run', minutes: 40, points: 40, occurredAt: monaRunAt } },
-      { upsert: true },
-    );
-    await Activity.updateOne(
-      { user: hubot._id, team: robocats._id, type: 'cycle', occurredAt: hubotCycleAt },
-      { $set: { user: hubot._id, team: robocats._id, type: 'cycle', minutes: 25, points: 25, occurredAt: hubotCycleAt } },
-      { upsert: true },
-    );
-    await Workout.updateOne(
-      { title: 'Intervals' },
-      { $set: { title: 'Intervals', focus: 'endurance', minutes: 30, difficulty: 'moderate' } },
-      { upsert: true },
-    );
-    await Workout.updateOne(
-      { title: 'Strength Circuit' },
-      { $set: { title: 'Strength Circuit', focus: 'strength', minutes: 30, difficulty: 'moderate' } },
-      { upsert: true },
-    );
+
+    await upsertDemoActivity(mona._id, octocats._id, 'run', 40, monaRunAt);
+    await upsertDemoActivity(hubot._id, robocats._id, 'cycle', 25, hubotCycleAt);
+    await upsertDemoWorkout('Intervals', 'endurance', 30, 'moderate');
+    await upsertDemoWorkout('Strength Circuit', 'strength', 30, 'moderate');
+
+    await Team.updateOne({ _id: octocats._id }, { $addToSet: { members: mona._id } });
+    await Team.updateOne({ _id: robocats._id }, { $addToSet: { members: hubot._id } });
   } finally {
     await disconnectDatabase();
   }
